@@ -5,4 +5,10 @@ export type Channel = {
   thumbnailUrl: string | null;
   isSelected: boolean;
   syncedAt: string | null;
+  selectedAt: string | null;
+};
+
+export type ChannelWithUsage = Channel & {
+  daysSinceLastWatched: number | null;
+  needsAttention: boolean;
 };

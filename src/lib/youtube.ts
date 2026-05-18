@@ -35,6 +35,47 @@ async function youtubeGet(
   return res.json();
 }
 
+async function youtubeDelete(
+  path: string,
+  params: Record<string, string>,
+  accessToken: string
+): Promise<void> {
+  const url = new URL(`${YOUTUBE_API_BASE}${path}`);
+  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
+
+  const res = await fetch(url.toString(), {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`YouTube API error ${res.status}: ${body}`);
+  }
+}
+
+// Find the user's subscription resource ID for a given channel.
+// subscriptions.delete needs the subscription ID, not the channel ID.
+export async function findSubscriptionId(
+  channelId: string,
+  accessToken: string
+): Promise<string | null> {
+  const data = (await youtubeGet(
+    "/subscriptions",
+    { part: "id", mine: "true", forChannelId: channelId },
+    accessToken
+  )) as { items?: Array<{ id: string }> };
+
+  return data.items?.[0]?.id ?? null;
+}
+
+export async function deleteSubscription(
+  subscriptionId: string,
+  accessToken: string
+): Promise<void> {
+  await youtubeDelete("/subscriptions", { id: subscriptionId }, accessToken);
+}
+
 export async function fetchSubscriptions(accessToken: string): Promise<YoutubeSubscription[]> {
   const results: YoutubeSubscription[] = [];
   let pageToken: string | undefined;
