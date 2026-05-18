@@ -39,6 +39,12 @@ export default function Header() {
         </Link>
         <nav className="flex items-center gap-4">
           <Link
+            href="/stats"
+            className="text-sm text-stone-600 hover:text-stone-900 transition-colors"
+          >
+            ふりかえり
+          </Link>
+          <Link
             href="/channels"
             className="text-sm text-stone-600 hover:text-stone-900 transition-colors"
           >

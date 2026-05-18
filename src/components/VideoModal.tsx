@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
+import { loadYouTubeIframeApi } from "@/lib/youtubeIframeApi";
 
 type Props = {
   videoId: string;
@@ -10,6 +11,8 @@ type Props = {
   onClose: () => void;
 };
 
+const MIN_REPORTABLE_SECONDS = 1;
+
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString("ja-JP", {
     year: "numeric",
@@ -18,7 +21,26 @@ function formatDate(iso: string): string {
   });
 }
 
+async function reportWatched(videoId: string, seconds: number): Promise<void> {
+  if (seconds < MIN_REPORTABLE_SECONDS) return;
+  try {
+    await fetch("/api/watch-sessions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ youtubeVideoId: videoId, watchedSeconds: seconds }),
+      keepalive: true,
+    });
+  } catch {
+    // Tracking is best-effort; do not surface failures to the user.
+  }
+}
+
 export default function VideoModal({ videoId, title, channelName, publishedAt, onClose }: Props) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const playerRef = useRef<YT.Player | null>(null);
+  const segmentStartRef = useRef<number | null>(null);
+  const accumulatedMsRef = useRef<number>(0);
+
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -31,6 +53,58 @@ export default function VideoModal({ videoId, title, channelName, publishedAt, o
     };
   }, [onClose]);
 
+  useEffect(() => {
+    let cancelled = false;
+    const mountNode = containerRef.current;
+    if (!mountNode) return;
+
+    const stopSegment = () => {
+      if (segmentStartRef.current !== null) {
+        accumulatedMsRef.current += Date.now() - segmentStartRef.current;
+        segmentStartRef.current = null;
+      }
+    };
+
+    loadYouTubeIframeApi()
+      .then(() => {
+        if (cancelled || !window.YT?.Player) return;
+        playerRef.current = new window.YT.Player(mountNode, {
+          videoId,
+          playerVars: { autoplay: 1, rel: 0, modestbranding: 1 },
+          events: {
+            onStateChange: (event) => {
+              const state = event.data;
+              if (state === window.YT?.PlayerState.PLAYING) {
+                if (segmentStartRef.current === null) {
+                  segmentStartRef.current = Date.now();
+                }
+              } else if (
+                state === window.YT?.PlayerState.PAUSED ||
+                state === window.YT?.PlayerState.ENDED ||
+                state === window.YT?.PlayerState.BUFFERING
+              ) {
+                stopSegment();
+              }
+            },
+          },
+        });
+      })
+      .catch(() => {
+        // If the API fails to load, the modal still closes cleanly.
+      });
+
+    return () => {
+      cancelled = true;
+      stopSegment();
+      const totalSeconds = Math.round(accumulatedMsRef.current / 1000);
+      void reportWatched(videoId, totalSeconds);
+      playerRef.current?.destroy();
+      playerRef.current = null;
+      segmentStartRef.current = null;
+      accumulatedMsRef.current = 0;
+    };
+  }, [videoId]);
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
@@ -41,12 +115,7 @@ export default function VideoModal({ videoId, title, channelName, publishedAt, o
         onClick={(e) => e.stopPropagation()}
       >
         <div className="relative w-full" style={{ paddingTop: "56.25%" }}>
-          <iframe
-            className="absolute inset-0 w-full h-full"
-            src={`https://www.youtube.com/embed/${videoId}?rel=0&modestbranding=1&autoplay=1`}
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-            allowFullScreen
-          />
+          <div ref={containerRef} className="absolute inset-0 w-full h-full" />
         </div>
         <div className="p-4 flex items-start justify-between gap-4">
           <div>
